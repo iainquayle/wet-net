@@ -1,195 +1,64 @@
-import glob
-import os
-import torchvision.transforms as transforms 
-import torchvision
 import torch
-import torch.nn as nn
-import torch.optim as optim
-import torch.utils.data
-from torch.utils.data import Dataset, DataLoader
-from torchvision import datasets, models, transforms
-import matplotlib.pyplot as plt
-import os
-import pandas
+from torch import nn 
+from torch.nn import functional
 
-USE_AMP = True
+#256 1024
+#128 512
+#64 256
+#32 128
+#16 64
+#8 32
 
-CUDA = 'cuda'
-CPU = 'cpu'
+ENCODER = 'encoder'
+DECODER = 'decoder'
 
-ADAM = 'adam'
-SGD = 'sgd'
+class ConvStack(nn.Module):
+	def __init__(self, channels, layer_count) -> None:
+		super().__init__()
+		self.layers = [(nn.BatchNorm2d(channels), nn.Conv2d(channels, channels, kernel_size=3, padding='same'))]
+	def forward(self, x):
+		for bn, conv in self.layers:
+			x = bn(functional.relu(conv(x)))
+		return x
 
-OPTIMIZER = SGD 
-
-TRAIN = 'train'
-TEST = 'sample'
-EVAL = 'eval'
-
-MODE = EVAL 
-
-HEAVY = 'heavy'
-MEDIUM = 'medium'
-LITE = 'lite'
-
-AUGMENTATION = HEAVY 
-
-INPUT_IMAGE_SIZE = 480 
-
-NEW_MODEL = False 
-FREEZE_FEATURES = False
-
-ADAM_LR = 0.0001
-SGD_LR = 0.01
-GAMMA = 0.96
-
-EPOCHS = 1000
-BATCH_SIZE = 32 
-LOADER_WORKERS = 2 
-PERSITANT_WORKERS = LOADER_WORKERS > 0
-data_path = 'data/Assignment 3 Dataset/'
-read_path = './PreTrain/effv2_m_4.pt'
-save_path = './PreTrain/effv2_m_4.pt'
-preictions_save_path = 'predictions.csv'
-
-
+class DownMod(nn.Module):
+	def __init__(self, channels_in, channels_out) -> None:
+		super().__init__()
+		self.stack = ConvStack(channels_in, 3)
+		self.down = nn.Conv2d(channels_in, channels_out, kernel_size=2, stride=2)
+		self.bn_down = nn.BatchNorm2d(channels_in)
+	def forward(self, x):
+		x = self.stack(x)
+		x = self.bn_down(functional.relu(self.down(x))) 
+		return x	
 	
-if __name__ == '__main__':
-	torch.manual_seed(0)
-
-	device = torch.device(CUDA if torch.cuda.is_available() else CPU)
-	#use_amp = use_amp and device == CUDA
-	print(device == CUDA)
-	print(USE_AMP)
-	print(device)
-
-	batched_augmentation_transforms = None
-	if AUGMENTATION == HEAVY:
-		batched_augmentation_transforms = nn.Sequential(
-         transforms.RandomAdjustSharpness(0.4, 0.2),
-			transforms.ElasticTransform(alpha=40.0),
-         transforms.RandomPerspective(distortion_scale=0.35, p=0.35),
-			transforms.RandomErasing(p=0.3),
-			transforms.RandomErasing(p=0.3),
-			transforms.RandomAffine(degrees=(0, 30), translate=(0.0, 0.5), scale=(0.7, 1.0), shear=(0.0, 0.4)),
-			transforms.ColorJitter(brightness=(0.8, 1.2), contrast=(0.8, 1.2), saturation=(0.8, 1.2), hue=(-0.2, 0.2)),
-			transforms.RandomHorizontalFlip(p=0.5),
-         transforms.RandomGrayscale(p=0.2),
-		)
-	elif AUGMENTATION == MEDIUM:
-		batched_augmentation_transforms = nn.Sequential(
-			transforms.RandomAffine(degrees=(0, 20), translate=(0.0, 0.2), scale=(0.8, 1.0), shear=(0.0, 0.2)),
-			transforms.ColorJitter(brightness=(0.90, 1.10), contrast=(0.9, 1.1), saturation=(0.9, 1.1), hue=(-0.10, 0.10)),
-			transforms.ElasticTransform(alpha=8.0),
-			transforms.RandomHorizontalFlip(p=0.5),
-		)
-	else:
-		batched_augmentation_transforms = nn.Sequential(
-			transforms.RandomHorizontalFlip(0.5),
-		)
+class UpMod(nn.Module):
+	def __init__(self, channels_in, channels_out) -> None:
+		super().__init__()
+		self.up = nn.ConvTranspose2d(channels_in, channels_out, kernel_size=2, stride=2)
+		self.bn_up = nn.BatchNorm2d(channels_in)
+		self.stack = ConvStack(channels_in, 2)
+	def forward(self, x):
+		x = self.bn_up(functional.relu(self.up(x))) 
+		x = self.stack(x)
+		return x	
 	
-
-
-	batched_standard_transforms =	None
-	model = None
-	if MODEL == RES34:
-		model = TransferModel()
-		batched_standard_transforms = nn.Sequential(
-			transforms.Resize(256),
-			transforms.CenterCrop(224),	
-		)
-	elif MODEL == EFFV2:
-		model = EffTransferModel()
-		batched_standard_transforms = nn.Sequential(
-			transforms.Resize(INPUT_IMAGE_SIZE),
-			transforms.CenterCrop(INPUT_IMAGE_SIZE),	
-			transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-		)
-	else:
-		model = NewModel()	
-		batched_standard_transforms = nn.Sequential(
-			transforms.Resize(512),
-			transforms.CenterCrop(512),	
-		)
-
-	if not NEW_MODEL:
-		model.load_state_dict(torch.load(read_path, map_location='cpu'))
-
-
-	if MODE == TRAIN:
-		train_dataset = AssignmentCarsDataset(data_path, TRAIN)
-		train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=LOADER_WORKERS, persistent_workers=PERSITANT_WORKERS, pin_memory=True)
-
-		criterion = nn.CrossEntropyLoss()
-		optimizer = None
-		if OPTIMIZER == ADAM:
-			optimizer = optim.Adam(model.parameters(), lr=ADAM_LR, weight_decay=0.00002)
-		else:
-			optimizer = optim.SGD(model.parameters(), lr=SGD_LR, momentum=0.9, weight_decay=0.00002)
-		scheduler = optim.lr_scheduler.ExponentialLR(optimizer=optimizer, gamma=GAMMA, verbose=True)
-		#scheduler = optim.lr_scheduler.StepLR(optimizer=optimizer, step_size=10, gamma=0.5, verbose=True)
-		scaler = torch.cuda.amp.GradScaler(enabled=USE_AMP)
-
-		model = model.to(device)
-		batched_augmentation_transforms = batched_augmentation_transforms.to(device)
-		batched_standard_transforms = batched_standard_transforms.to(device)
-		model.train()
-
-		print(device)
-
-		best_accuracy = 0.0
-		best_loss = 10000000.0
-		for epoch in range(EPOCHS):
-			print(f"epoch: {epoch}")
-			total_loss = 0
-			total_sample = 0
-			correct = 0
-			for batch_index, (images, labels) in enumerate(train_loader):
-				optimizer.zero_grad(set_to_none=True)
-				if device == CUDA:
-					torch.cuda.empty_cache()
-				images = images.to(device)
-				labels = labels.to(device)
-				with torch.autocast(device_type='cuda', dtype=torch.float16, enabled=USE_AMP):					
-					images = batched_augmentation_transforms(images)
-					images = batched_standard_transforms(images)
-					outputs = model(images)
-					loss = criterion(outputs, labels)
-				scaler.scale(loss).backward()
-				scaler.step(optimizer)
-				scaler.update()
-				#loss.backward()
-				#optimizer.step()
-				total_loss += loss.item() * images.size(0) 
-				total_sample += images.size(0) 
-				correct += (torch.argmax(outputs, dim=1, keepdim=False) == labels).sum().item()
-			scheduler.step()
-			accuracy = correct / total_sample
-			loss = total_loss / total_sample
-			if loss < best_loss:
-				print("saved")
-				torch.save(model.state_dict(), save_path)
-				best_loss = loss
-				best_accuracy = accuracy
-			print(f"Training: Accuracy: {accuracy}, Loss: {loss}")
-			
-
-		torch.save(model.state_dict(), save_path)
-		
-	if MODE == EVAL:
-		test_dataset = AssignmentCarsDataset(data_path, TEST)
-		test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False, num_workers=0, pin_memory=True)
-
-		model = model.to(device)
-		batched_standard_transforms = batched_standard_transforms.to(device)
-
-		model.eval()
-		for i, (image, _) in enumerate(test_loader):
-			image = image.to(device)
-			image = batched_standard_transforms(image)
-			outputs = model(image)
-			predicted = torch.argmax(outputs, dim=1).item()
-			test_dataset.data_frame.at[i, 'Predicted'] = predicted
-			print(test_dataset.data_frame.iloc[i])
-		
-		test_dataset.data_frame.to_csv(preictions_save_path, index=False)
+class Model1(nn.Module):
+	def __init__(self, channels) -> None:
+		super().__init__()
+		self.layers = {
+			ENCODER: [
+				DownMod(channels, 32),
+				DownMod(32, 64),
+				DownMod(64, 128),
+				DownMod(128, 192),
+				DownMod(192, 256),
+			],
+			DECODER: [
+				UpMod(256, 192),
+				UpMod(192, 128),
+				UpMod(128, 64),
+				UpMod(64, 32),
+				UpMod(32, channels),
+			]
+		}
