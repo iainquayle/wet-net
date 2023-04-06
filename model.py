@@ -52,85 +52,10 @@ read_path = './PreTrain/effv2_m_4.pt'
 save_path = './PreTrain/effv2_m_4.pt'
 preictions_save_path = 'predictions.csv'
 
-AIRMASS = "airmass"
-SANDWICH = "sandwich"
-MICROCLOUD = "microcloud"
 
-def get_file_name(path):
-	return path[path.rindex("/") + 1, -1]
-class WeatherDataset(Dataset):
-	def __init__(self, root, sets, sequence_size):
-		super().__init__() 
-		self.root = root
-		self.sets = sets
-		self.sequence_size = sequence_size
-		self.paths = {}
-		for name in sets:
-			self.paths[name] = glob.glob(f"{root}/{name}/*.jpg", recursive=True).sort() 	
-		indices_forward = self.match_paths_forward(0)
-		indices_backward = self.match_paths_backward(-1)
-		for key in self.paths:
-			self.paths = self.paths[indices_forward[key], indices_backward[key]]
-	def match_paths_forward(self, index):
-		indices = {}
-		largest_name = "0"
-		for key, paths in self.paths.items():
-			indices[key] = index 
-			if paths[index] > largest_name:
-				largest_name = paths[index]
-		for key in self.paths:
-			while self.paths[key][indices[key]] < largest_name :			
-				indices[key] += 1	
-		return indices 
-	def match_paths_backward(self, index):
-		indices = {}
-		smallest_name = "111111111111111111111111"
-		for key, paths in self.paths.items():
-			indices[key] = index 
-			if paths[index] < smallest_name:
-				smallest_name = paths[index]
-		for key in self.paths:
-			while self.paths[key][indices[key]] > smallest_name:			
-				indices[key] -= 1	
-		return indices
-	@staticmethod
-	def new(root, sets, sequence_size):
-		pass
-	@staticmethod
-	def new_from(root, sets, sequence_size, paths):
-		pass
-	def split_set(self, ratio):
-		pass
-	def __len__(self):
-		smallest_length = len(self.paths[self.sets[0]]) 
-		for name in self.sets:
-			if len(self.paths[name]) < smallest_length:
-				smallest_length = len(self.paths[name])
-		return smallest_length - self.sequence_size - 1 
-	def __getitem__(self, index):
-		images_in = [] 
-		for i in range(len(self.sets)):
-			images_in += self.paths[self.sets[i]][index]
-		images_out = [] 
-		for i in range(len(self.sets)):
-			images_out += self.paths[self.sets[i]][index]
-		return self.standard_transforms(image.type(torch.float32)) / 255.0, self.data_frame.iloc[i][1]
 	
-
-def plot(dataset, index, times):
-    fig, axs = plt.subplots(ncols=times, squeeze=False)
-    for i in range(times):
-        image_tuple = dataset[i + index]
-        axs[0][i].imshow(image_tuple[0].permute(1, 2, 0))
-        axs[0][i].set(title=image_tuple[1], xticklabels=[], yticklabels=[], xticks=[], yticks=[])
-    plt.tight_layout()
-    plt.show()
-
-
 if __name__ == '__main__':
 	torch.manual_seed(0)
-
-	#TODO: looking into torch amp and maybe able to fit effnet v2 m on gpu
 
 	device = torch.device(CUDA if torch.cuda.is_available() else CPU)
 	#use_amp = use_amp and device == CUDA
