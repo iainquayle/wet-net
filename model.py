@@ -56,42 +56,66 @@ AIRMASS = "airmass"
 SANDWICH = "sandwich"
 MICROCLOUD = "microcloud"
 
+def get_file_name(path):
+	return path[path.rindex("/") + 1, -1]
 class WeatherDataset(Dataset):
-	def __init__(self, root):
+	def __init__(self, root, sets, sequence_size):
 		super().__init__() 
 		self.root = root
-		self.paths = {
-			AIRMASS: glob.glob(f"{root}/{AIRMASS}/*.jpg", recursive=True), 	
-			SANDWICH: glob.glob(f"{root}/{SANDWICH}/*.jpg", recursive=True), 	
-			MICROCLOUD: glob.glob(f"{root}/{MICROCLOUD}/*.jpg", recursive=True), 	
-		}
-		indeces = [0] * len(self.paths)
-		
+		self.sets = sets
+		self.sequence_size = sequence_size
+		self.paths = {}
+		for name in sets:
+			self.paths[name] = glob.glob(f"{root}/{name}/*.jpg", recursive=True).sort() 	
+		indices_forward = self.match_paths_forward(0)
+		indices_backward = self.match_paths_backward(-1)
+		for key in self.paths:
+			self.paths = self.paths[indices_forward[key], indices_backward[key]]
+	def match_paths_forward(self, index):
+		indices = {}
+		largest_name = "0"
+		for key, paths in self.paths.items():
+			indices[key] = index 
+			if paths[index] > largest_name:
+				largest_name = paths[index]
+		for key in self.paths:
+			while self.paths[key][indices[key]] < largest_name :			
+				indices[key] += 1	
+		return indices 
+	def match_paths_backward(self, index):
+		indices = {}
+		smallest_name = "111111111111111111111111"
+		for key, paths in self.paths.items():
+			indices[key] = index 
+			if paths[index] < smallest_name:
+				smallest_name = paths[index]
+		for key in self.paths:
+			while self.paths[key][indices[key]] > smallest_name:			
+				indices[key] -= 1	
+		return indices
+	@staticmethod
+	def new(root, sets, sequence_size):
+		pass
+	@staticmethod
+	def new_from(root, sets, sequence_size, paths):
+		pass
+	def split_set(self, ratio):
+		pass
 	def __len__(self):
-		len(self.airmass_paths)
-	def __getitem__(self, i):
-		image = torchvision.io.read_image(os.path.join(self.root, self.data_frame.iloc[i][0]))
+		smallest_length = len(self.paths[self.sets[0]]) 
+		for name in self.sets:
+			if len(self.paths[name]) < smallest_length:
+				smallest_length = len(self.paths[name])
+		return smallest_length - self.sequence_size - 1 
+	def __getitem__(self, index):
+		images_in = [] 
+		for i in range(len(self.sets)):
+			images_in += self.paths[self.sets[i]][index]
+		images_out = [] 
+		for i in range(len(self.sets)):
+			images_out += self.paths[self.sets[i]][index]
 		return self.standard_transforms(image.type(torch.float32)) / 255.0, self.data_frame.iloc[i][1]
 	
-
-class AssignmentCarsDataset(Dataset):
-	def __init__(self, root, set):
-		super().__init__() 
-		self.root = root
-		self.set = set
-		self.data_frame = pandas.read_csv(os.path.join(root, f"{set}.csv"))
-		self.standard_transforms = nn.Sequential(
-			transforms.Resize(512),
-			transforms.CenterCrop(size=(512 - 128, 512 + 64)),
-			transforms.Pad(padding=256),
-			transforms.CenterCrop(512 + 64),
-		)
-	def __len__(self):
-		return len(self.data_frame)
-	def __getitem__(self, i):
-		image = torchvision.io.read_image(os.path.join(self.root, self.data_frame.iloc[i][0]))
-		return self.standard_transforms(image.type(torch.float32)) / 255.0, self.data_frame.iloc[i][1]
-
 
 def plot(dataset, index, times):
     fig, axs = plt.subplots(ncols=times, squeeze=False)
@@ -101,118 +125,6 @@ def plot(dataset, index, times):
         axs[0][i].set(title=image_tuple[1], xticklabels=[], yticklabels=[], xticks=[], yticks=[])
     plt.tight_layout()
     plt.show()
-
-class Head512(nn.Module):
-	def __init__(self, in_channels, out_channels) -> None:
-		super().__init__()	
-		self.conv_1 = nn.Conv2d(in_channels=in_channels, out_channels=int(out_channels / 2), kernel_size=2, stride=2,  padding='valid')
-		self.relu_1 = nn.ReLU()
-		self.conv_2 = nn.Conv2d(in_channels=int(out_channels / 2), out_channels=out_channels, kernel_size=2, stride=2,  padding='valid')
-		self.relu_2 = nn.ReLU()
-	def forward(self, x):
-		x = self.conv_1(x)
-		x = self.relu_1(x)
-		x = self.conv_2(x)
-		x = self.relu_2(x)
-		return x
-class Head256(nn.Module):
-	def __init__(self, in_channels, out_channels) -> None:
-		super().__init__()	
-		self.conv_1 = nn.Conv2d(in_channels=in_channels, out_channels=int(out_channels / 3), kernel_size=3,  padding='same')
-		self.relu_1 = nn.ReLU()
-		self.conv_2 = nn.Conv2d(in_channels=int(out_channels / 3), out_channels=int(out_channels / 2), kernel_size=2, stride=2,  padding='valid')
-		self.relu_2 = nn.ReLU()
-		self.conv_3 = nn.Conv2d(in_channels=int(out_channels / 2), out_channels=out_channels, kernel_size=3,  padding='same')
-		self.relu_3 = nn.ReLU()
-	def forward(self, x):
-		x = self.conv_1(x)
-		x = self.relu_1(x)
-		x = self.conv_2(x)
-		x = self.relu_2(x)
-		x = self.conv_3(x)
-		x = self.relu_3(x)
-		return x
-class DownSample(nn.Module):
-	def __init__(self, in_channels, out_channels) -> None:
-		super().__init__()
-		self.conv = nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=2, stride=2)
-		self.conv_relu = nn.ReLU()
-		self.pool = nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2), padding=0)
-		self.pool_pointwise = nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=1)
-		self.pool_relu = nn.ReLU()
-	def forward(self, x):
-		return torch.cat(tensors=(
-			self.conv_relu(self.conv(x)),
-			self.pool_relu(self.pool_pointwise(self.pool(x)))	
-		), dim=1)
-class ConvDownSample(nn.Module):
-	def __init__(self, in_channels, out_channels) -> None:
-		super().__init__()
-		self.conv = nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=2, stride=2)
-		self.conv_relu = nn.ReLU()
-	def forward(self, x):
-		return self.conv_relu(self.conv(x))
-class Residual(nn.Module):
-	def __init__(self, channels) -> None:
-		super().__init__()
-		self.conv_1 = nn.Conv2d(in_channels=channels, out_channels=channels, kernel_size=3,  padding='same')
-		self.conv_2 = nn.Conv2d(in_channels=channels, out_channels=channels, kernel_size=3,  padding='same')
-		self.conv_1x = nn.Conv2d(in_channels=channels, out_channels=channels, kernel_size=(3, 1),  padding='same')
-		self.conv_1y = nn.Conv2d(in_channels=channels, out_channels=channels, kernel_size=(1, 3),  padding='same')
-		self.conv_2x = nn.Conv2d(in_channels=channels, out_channels=channels, kernel_size=(3, 1),  padding='same')
-		self.conv_2y = nn.Conv2d(in_channels=channels, out_channels=channels, kernel_size=(1, 3),  padding='same')
-		self.conv_relu = nn.ReLU()
-		self.batch_norm_1 = nn.BatchNorm2d(num_features=channels)
-		self.batch_norm_2 = nn.BatchNorm2d(num_features=channels)
-		self.final_batch_norm = nn.BatchNorm2d(num_features=channels)
-		self.final_relu = nn.ReLU()
-		self.dropout = nn.Dropout2d(p=0.1)
-	def forward(self, x):
-		y = self.conv_1(x)	
-		#y = self.conv_1x(x)	
-		#y = self.conv_1y(y)	
-		y = self.batch_norm_1(y)	
-		y = self.conv_relu(y)	
-		y = self.conv_2(y)	
-		#y = self.conv_2x(y)	
-		#y = self.conv_2y(y)	
-		y = self.batch_norm_2(y)	
-		y = self.final_relu(y + x)
-		#y = self.dropout(y)
-		return y 
-
-class TransferModel(nn.Module):
-	def __init__(self) -> None:
-		super().__init__()
-		self.pretrained_model = models.resnet34(pretrained=True) 
-		num_features = self.pretrained_model.fc.in_features
-		#for param in self.pretrained_model.parameters():
-			#param.requires_grad = False
-		self.pretrained_model.fc = nn.Sequential(
-			nn.Linear(num_features, (num_features + 100) // 2),
-			nn.ReLU(),
-			nn.Dropout(0.1),
-			nn.Linear((num_features + 100) // 2, 100),
-			nn.Sigmoid()
-		)
-	def forward(self, x):
-		return self.pretrained_model(x)	
-
-class EffTransferModel(nn.Module):
-	def __init__(self) -> None:
-		super().__init__()
-		self.pretrained_model = models.efficientnet_v2_m(weights=models.EfficientNet_V2_M_Weights.DEFAULT) 
-		num_features = self.pretrained_model.classifier[-1].in_features
-		#for param in self.pretrained_model.parameters():
-		#	param.requires_grad = False
-		new_classifier = list(self.pretrained_model.classifier.children())[:-1]
-		new_classifier.extend([nn.Linear(num_features, 100)])	
-		new_classifier = nn.Sequential(*new_classifier)
-		#for param in new_classifier.parameters():
-		#	param.requires_grad = True 
-		self.pretrained_model.classifier = new_classifier 
-	def forward(self, x):
-		return self.pretrained_model(x)	
 
 
 if __name__ == '__main__':
