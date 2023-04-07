@@ -16,7 +16,7 @@ class BnConv(nn.Module):
 class ConvStack(nn.Module):
 	def __init__(self, channels, layer_count) -> None:
 		super().__init__()
-		self.layers = [BnConv(channels, channels) for _ in range(layer_count)]
+		self.layers = nn.ModuleList([BnConv(channels, channels) for _ in range(layer_count)])
 	def forward(self, x):
 		for layer  in self.layers:
 			x = layer(x)
@@ -70,7 +70,7 @@ class Model1(nn.Module):
 				UpMod(32, channels),
 			]
 		}
-		self.sub_modules = {key: nn.Sequential(*layers) for key, layers in self.layers.items()} 
+		self.sub_modules = nn.ModuleDict({key: nn.Sequential(*layers) for key, layers in self.layers.items()}) 
 	def forward(self, x):
 		x = self.sub_modules[ENCODER](x)	
 		x = self.sub_modules[DECODER](x)	
