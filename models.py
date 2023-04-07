@@ -2,23 +2,24 @@ import torch
 from torch import nn 
 from torch.nn import functional
 
-#256 1024
-#128 512
-#64 256
-#32 128
-#16 64
-#8 32
 
 ENCODER = 'encoder'
 DECODER = 'decoder'
 
+class BnConv(nn.Module):
+	def __init__(self, channels_in, channels_out, kernel_size = 3, stride = 1, padding = 'same') -> None:
+		super().__init__()
+		self.bn = nn.BatchNorm2d(channels_out)
+		self.conv = nn.Conv2d(channels_in, channels_out, kernel_size=kernel_size, stride=stride, padding=padding)
+	def forward(self, x):
+		return self.bn(functional.relu(self.conv(x)))	
 class ConvStack(nn.Module):
 	def __init__(self, channels, layer_count) -> None:
 		super().__init__()
-		self.layers = [(nn.BatchNorm2d(channels), nn.Conv2d(channels, channels, kernel_size=3, padding='same'))]
+		self.layers = [BnConv(channels, channels) for _ in range(layer_count)]
 	def forward(self, x):
-		for bn, conv in self.layers:
-			x = bn(functional.relu(conv(x)))
+		for layer  in self.layers:
+			x = layer(x)
 		return x
 
 class DownMod(nn.Module):
@@ -26,7 +27,7 @@ class DownMod(nn.Module):
 		super().__init__()
 		self.stack = ConvStack(channels_in, 3)
 		self.down = nn.Conv2d(channels_in, channels_out, kernel_size=2, stride=2)
-		self.bn_down = nn.BatchNorm2d(channels_in)
+		self.bn_down = nn.BatchNorm2d(channels_out)
 	def forward(self, x):
 		x = self.stack(x)
 		x = self.bn_down(functional.relu(self.down(x))) 
@@ -36,16 +37,23 @@ class UpMod(nn.Module):
 	def __init__(self, channels_in, channels_out) -> None:
 		super().__init__()
 		self.up = nn.ConvTranspose2d(channels_in, channels_out, kernel_size=2, stride=2)
-		self.bn_up = nn.BatchNorm2d(channels_in)
-		self.stack = ConvStack(channels_in, 2)
+		self.bn_up = nn.BatchNorm2d(channels_out)
+		self.stack = ConvStack(channels_out, 2)
 	def forward(self, x):
 		x = self.bn_up(functional.relu(self.up(x))) 
 		x = self.stack(x)
 		return x	
 	
+#256 1024
+#128 512
+#64 256
+#32 128
+#16 64
+#8 32
 class Model1(nn.Module):
 	def __init__(self, channels) -> None:
 		super().__init__()
+		self.sections = [ENCODER, DECODER]
 		self.layers = {
 			ENCODER: [
 				DownMod(channels, 32),
@@ -62,3 +70,8 @@ class Model1(nn.Module):
 				UpMod(32, channels),
 			]
 		}
+		self.sub_modules = {key: nn.Sequential(*layers) for key, layers in self.layers.items()} 
+	def forward(self, x):
+		x = self.sub_modules[ENCODER](x)	
+		x = self.sub_modules[DECODER](x)	
+		return x
