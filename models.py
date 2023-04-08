@@ -12,7 +12,7 @@ class BnConv(nn.Module):
 		self.bn = nn.BatchNorm2d(channels_out)
 		self.conv = nn.Conv2d(channels_in, channels_out, kernel_size=kernel_size, stride=stride, padding=padding)
 	def forward(self, x):
-		return self.bn(functional.relu(self.conv(x)))	
+		return functional.relu(self.bn(self.conv(x)))
 class ConvStack(nn.Module):
 	def __init__(self, channels, layer_count) -> None:
 		super().__init__()
@@ -26,11 +26,10 @@ class DownMod(nn.Module):
 	def __init__(self, channels_in, channels_out) -> None:
 		super().__init__()
 		self.stack = ConvStack(channels_in, 3)
-		self.down = nn.Conv2d(channels_in, channels_out, kernel_size=2, stride=2)
-		self.bn_down = nn.BatchNorm2d(channels_out)
+		self.down = BnConv(channels_in, channels_out, kernel_size=2, stride=2)
 	def forward(self, x):
 		x = self.stack(x)
-		x = self.bn_down(functional.relu(self.down(x))) 
+		x = self.down(x)
 		return x	
 	
 class UpMod(nn.Module):
@@ -40,7 +39,7 @@ class UpMod(nn.Module):
 		self.bn_up = nn.BatchNorm2d(channels_out)
 		self.stack = ConvStack(channels_out, 2)
 	def forward(self, x):
-		x = self.bn_up(functional.relu(self.up(x))) 
+		x = functional.relu(self.bn_up(self.up(x)))
 		x = self.stack(x)
 		return x	
 	
@@ -56,7 +55,8 @@ class Model1(nn.Module):
 		self.sections = [ENCODER, DECODER]
 		self.layers = {
 			ENCODER: [
-				DownMod(channels, 32),
+				BnConv(channels, 32),
+				DownMod(32, 32),
 				DownMod(32, 64),
 				DownMod(64, 128),
 				DownMod(128, 192),
@@ -67,7 +67,8 @@ class Model1(nn.Module):
 				UpMod(192, 128),
 				UpMod(128, 64),
 				UpMod(64, 32),
-				UpMod(32, channels),
+				UpMod(32, 32),
+				BnConv(32, channels),
 			]
 		}
 		self.sub_modules = nn.ModuleDict({key: nn.Sequential(*layers) for key, layers in self.layers.items()}) 

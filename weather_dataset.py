@@ -23,7 +23,7 @@ class WeatherDataset(Dataset):
 			transforms.Resize(1024),
 			#transforms.Normalize(0.5, 0.5),			
 		)  
-		self.mask = functional.resize(tensor([[[(i < 4 and j > 12) or (j > 14)  for i in range(16)] for j in range(16)]
+		self.mask = functional.resize(tensor([[[(i < 4 and j > 26) or (j > 30)  for i in range(32)] for j in range(32)]
 		]), size=1024, interpolation=transforms.InterpolationMode.NEAREST)
 	@staticmethod
 	def new(root, sets, sequence_size):
