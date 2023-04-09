@@ -6,15 +6,16 @@ from torch.nn import functional
 ENCODER = 'encoder'
 DECODER = 'decoder'
 
+#TODO: consider removing a layer
 class BnConv(nn.Module):
-	def __init__(self, channels_in, channels_out, kernel_size = 3, stride = 1, padding = 'same') -> None:
+	def __init__(self, channels_in, channels_out, kernel_size = 3, stride = 1, padding = 'same', half_dilated = False) -> None:
 		super().__init__()
 		self.bn = nn.BatchNorm2d(channels_out)
 		self.conv = nn.Conv2d(channels_in, channels_out, kernel_size=kernel_size, stride=stride, padding=padding)
 	def forward(self, x):
 		return functional.relu(self.bn(self.conv(x)))
 class ConvStack(nn.Module):
-	def __init__(self, channels, layer_count) -> None:
+	def __init__(self, channels, layer_count, half_dilated = False) -> None:
 		super().__init__()
 		self.layers = nn.ModuleList([BnConv(channels, channels) for _ in range(layer_count)])
 	def forward(self, x):
@@ -23,7 +24,7 @@ class ConvStack(nn.Module):
 		return x
 
 class DownMod(nn.Module):
-	def __init__(self, channels_in, channels_out) -> None:
+	def __init__(self, channels_in, channels_out, res_connect=False,  half_dilated = False) -> None:
 		super().__init__()
 		self.stack = ConvStack(channels_in, 3)
 		self.down = BnConv(channels_in, channels_out, kernel_size=2, stride=2)
@@ -33,7 +34,7 @@ class DownMod(nn.Module):
 		return x	
 	
 class UpMod(nn.Module):
-	def __init__(self, channels_in, channels_out) -> None:
+	def __init__(self, channels_in, channels_out, res_connect=False, half_dilated = False) -> None:
 		super().__init__()
 		self.up = nn.ConvTranspose2d(channels_in, channels_out, kernel_size=2, stride=2)
 		self.bn_up = nn.BatchNorm2d(channels_out)

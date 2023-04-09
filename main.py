@@ -64,7 +64,7 @@ def run_model():
 
 
 	if MODE == TRAIN:
-		train_dataset = WeatherDataset("data", DATA_SUBSETS, 1)	
+		train_dataset = WeatherDataset.new_from_files("data", DATA_SUBSETS)	
 		train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=SHUFFLE, num_workers=LOADER_WORKERS, persistent_workers=PERSITANT_WORKERS, pin_memory=True)
 
 		criterion = nn.KLDivLoss()
@@ -73,6 +73,7 @@ def run_model():
 		scheduler = optim.lr_scheduler.ExponentialLR(optimizer=optimizer, gamma=GAMMA, verbose=True)
 		#scheduler = optim.lr_scheduler.StepLR(optimizer=optimizer, step_size=10, gamma=0.5, verbose=True)
 		scaler = torch.cuda.amp.GradScaler(enabled=USE_AMP)
+
 
 		model = model.to(device)
 		model.train()
@@ -114,6 +115,4 @@ def run_model():
 
 	
 if __name__ == '__main__':
-	dataset = WeatherDataset("data", DATA_SUBSETS, 1)
-	img, _  = dataset[0]
-	plot_image(img)
+	run_model()
