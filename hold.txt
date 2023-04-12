@@ -1,3 +1,22 @@
+			ENCODER: nn.ModuleList([
+				BnConv(channels*sequence_size, 32, res_connect=False),
+				ConvStack(32, 32, 2, res_connect=True),
+				DownBnConv(32, 64),
+				ConvStack(64, 64, 3, res_connect=True),
+				DownBnConv(64, 128),
+				ConvStack(128, 128, 3, res_connect=True),
+			]),
+			DECODER: nn.ModuleList([
+				UpBnConv(128, 64),
+				ConvStack(128, 64, 3, res_connect=True),
+				UpBnConv(64, 32),
+				ConvStack(64, 32, 2, res_connect=True),
+				BnConv(32, channels, res_connect=False, activation=torch.tanh),
+
+		if self.x % 2 == 1:
+			x = functional.hflip(x)
+		if self.y % 2 == 1:
+			x = functional.vflip(x)
 
 if __name__ == '__main__':
 	#dataset = WeatherDataset("data", [AIRMASS, SANDWICH, MICROCLOUD], 1)	

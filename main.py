@@ -1,48 +1,48 @@
 from weather_dataset import WeatherDataset, TrainingTransforms, AIRMASS, MICROCLOUD, SANDWICH, plot_from_dataset, plot_images, plot_image_pairs
 from torch.utils.data import DataLoader
 from torch import optim, nn
-from models import Model1
+from models import Model1, Model2
 import torch
-import torchvision
-import random
-
-
-
-
 
 USE_AMP = True
 
 CUDA = 'cuda'
 CPU = 'cpu'
 
-DATA_SUBSETS = [AIRMASS]
 SHUFFLE = True
 
 LOSS = None
 
 ADAM = 'adam'
 SGD = 'sgd'
-OPTIMIZER = ADAM 
+
+MSE = 'mse'
+HUBER = 'huber'
+LONE = 'l1'
+
+TRAIN = 'train'
+EVAL = 'eval'
+
+INPUT_IMAGE_SIZE = 256 
+
+EPOCHS = 50 
+BATCH_SIZE = 16 
+LOADER_WORKERS = 2 
+PERSITANT_WORKERS = LOADER_WORKERS > 0
 
 ADAM_LR = 0.0003
 SGD_LR = 0.01
 GAMMA = 0.97
+OPTIMIZER = ADAM 
+LOSS = MSE
 
-TRAIN = 'train'
-EVAL = 'eval'
+#DATA_SUBSETS = [SANDWICH, MICROCLOUD, AIRMASS]
+DATA_SUBSETS = [SANDWICH]
 MODE = TRAIN 
-
-INPUT_IMAGE_SIZE = 256 
-
-NEW_MODEL = False 
-
-EPOCHS = 50 
-BATCH_SIZE = 16 
-LOADER_WORKERS = 4 
-PERSITANT_WORKERS = LOADER_WORKERS > 0
-
-read_path = "model_saves\\model1_1" 
-save_path = "model_saves\\model1_1"
+NEW_MODEL = True 
+SEQUENCE_SIZE = 2
+read_path = "model_saves\\model2_1" 
+save_path = "model_saves\\model2_1"
 
 
 def run_model():
@@ -53,7 +53,10 @@ def run_model():
 	print(device.type)
 	print(USE_AMP)
 	
-	model = Model1(3 * len(DATA_SUBSETS))
+	train_dataset = WeatherDataset.new_from_files("data", DATA_SUBSETS, sequence_size=SEQUENCE_SIZE, truth_sequence_size=3, truth_offset=1, stride=6)	
+	valid_dataset = train_dataset.split_set(0.8)
+	model = Model2(train_dataset.channels(), sequence_size=SEQUENCE_SIZE)
+	model = model.to(device)
 
 	if not NEW_MODEL:
 		print("model loading from save")
@@ -61,36 +64,34 @@ def run_model():
 
 
 	if MODE == TRAIN:
-		train_dataset = WeatherDataset.new_from_files("data", DATA_SUBSETS, truth_sequence_size=1, truth_offset=1, stride=6)	
-		valid_dataset = train_dataset.split_set(0.8)
 		train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=SHUFFLE, num_workers=LOADER_WORKERS, persistent_workers=PERSITANT_WORKERS, pin_memory=True)
 
-		#criterion = nn.KLDivLoss()
-		criterion = nn.MSELoss()
+		criterion = None
+		if LOSS == MSE:
+			criterion = nn.MSELoss()			
+		elif LOSS == HUBER:
+			criterion = nn.HuberLoss()
+		elif LOSS == LONE:
+			criterion = nn.L1Loss()
+		criterion = nn.MSELoss() 
 		
 		optimizer = optim.Adam(model.parameters(), lr=ADAM_LR, weight_decay=0.00002) if OPTIMIZER == ADAM else optim.SGD(model.parameters(), lr=SGD_LR, momentum=0.9, weight_decay=0.00002)
 		scheduler = optim.lr_scheduler.ExponentialLR(optimizer=optimizer, gamma=GAMMA, verbose=True)
 		#scheduler = optim.lr_scheduler.StepLR(optimizer=optimizer, step_size=10, gamma=0.5, verbose=True)
 		scaler = torch.cuda.amp.GradScaler(enabled=USE_AMP)
 
-
-		model = model.to(device)
 		model.train()
 		train_transforms = TrainingTransforms(INPUT_IMAGE_SIZE).to(device)
 
-		if True:
-			images = []
-			demo_size = 4
-			hold = valid_dataset.truth_sequence_size
-			valid_dataset.truth_sequence_size = demo_size 
-			image, truths = valid_dataset[0]
-			image = image[-1][None, :].to(device)
-			images.append(model(image).detach().to(CPU))
-			for i in range(0, demo_size - 1):
-				images.append(model(images[i].to(device)).detach().to(CPU))
-			valid_dataset.truth_sequence_size = hold
-			plot_image_pairs(list(zip(images, truths)))
-		exit()
+		best_loss = 10000000.0
+		
+		optimizer = optim.Adam(model.parameters(), lr=ADAM_LR, weight_decay=0.00002) if OPTIMIZER == ADAM else optim.SGD(model.parameters(), lr=SGD_LR, momentum=0.9, weight_decay=0.00002)
+		scheduler = optim.lr_scheduler.ExponentialLR(optimizer=optimizer, gamma=GAMMA, verbose=True)
+		#scheduler = optim.lr_scheduler.StepLR(optimizer=optimizer, step_size=10, gamma=0.5, verbose=True)
+		scaler = torch.cuda.amp.GradScaler(enabled=USE_AMP)
+
+		model.train()
+		train_transforms = TrainingTransforms(INPUT_IMAGE_SIZE).to(device)
 
 		best_loss = 10000000.0
 		for epoch in range(EPOCHS):
@@ -106,7 +107,7 @@ def run_model():
 				truth_images = [train_transforms(image.to(device)) for image in truth_images]
 				for i in range(len(truth_images)):
 					with torch.autocast(device_type='cuda', dtype=torch.float16, enabled=USE_AMP):					
-						outputs = model(images[-1])
+						outputs = model(images[-SEQUENCE_SIZE:])
 						loss = criterion(outputs, truth_images[i])
 						images.append(outputs.detach())
 					scaler.scale(loss).backward()
@@ -129,7 +130,19 @@ def run_model():
 		torch.save(model.state_dict(), save_path)
 		
 	if MODE == EVAL:
-		pass
+		outputs = []
+		demo_size = 4
+		hold = valid_dataset.truth_sequence_size
+		valid_dataset.truth_sequence_size = demo_size 
+		images, truths = valid_dataset[0]
+		images = [img[None, :].to(device) for img in images[-SEQUENCE_SIZE:]]
+		images.append(model(images).detach())
+		outputs.append(images[-1].to(CPU))
+		for i in range(0, demo_size - 1):
+			images.append(model(images[-SEQUENCE_SIZE:]).detach())
+			outputs.append(images[-1].to(CPU))
+		valid_dataset.truth_sequence_size = hold
+		plot_image_pairs(list(zip(outputs, truths)))
 
 	
 if __name__ == '__main__':

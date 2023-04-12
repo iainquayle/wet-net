@@ -35,7 +35,8 @@ class WeatherDataset(Dataset):
 		print("initializing dataset")
 		#cached_offsets = [0] * len(set_names)
 		get_file_name = lambda p: p[p.rindex("\\") + 1:]
-		paths = [sorted(list(map(get_file_name, glob(join(root, key, "*.jpg"), recursive=True)))) for key in set_names]
+		paths = [sorted(list(map(get_file_name, glob(join(root, set_names[0], "*.jpg"), recursive=True))))]
+		paths = paths + [(set(map(get_file_name, glob(join(root, set_names[i], "*.jpg"), recursive=True)))) for i in range(1, len(set_names))]
 		#for i in range(1, len(set_names)):
 		#	while chached_offsets
 		matching_file_names = [file_name for i, file_name in enumerate(paths[0]) if all([file_name in other_subset for other_subset in paths[1:]])]
@@ -61,6 +62,8 @@ class WeatherDataset(Dataset):
 		images = cat([read_image(join(self.root, set_name, self.matching_file_names[index])) for set_name in self.set_names])
 		truth_images = cat([read_image(join(self.root, set_name, self.matching_file_names[index + self.truth_offset])) for set_name in self.set_names])
 		return self.transforms(images / 255.0).masked_fill_(self.mask, 0.0),	self.transforms(truth_images / 255.0).masked_fill_(self.mask, 0.0)
+	def channels(self):
+		return len(self.set_names) * 3
 	
 class TrainingTransforms(nn.Module):
 	def __init__(self, image_dimension_out) -> None:
