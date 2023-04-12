@@ -39,7 +39,8 @@ def download_batch(url_formatter, save_path, start_day, end_day, start_hour, end
 	while day < end_day or hour < end_hour or minute < end_minute:
 		minute %= 60 
 		hour %= 24
-		result = requests.get(url_formatter.format(day, hour, minute))
+		url = url_formatter.format(day, hour, minute)
+		result = requests.get(url)
 		if  result.ok:
 			new_path = "{}/{}/{}{}{}{}".format(save_path, url_formatter.name, str_day(day), str_hour(hour), str_min(minute), url_formatter.extension)
 			os.makedirs(os.path.dirname(new_path), exist_ok=True)
@@ -47,12 +48,14 @@ def download_batch(url_formatter, save_path, start_day, end_day, start_hour, end
 				f.write(result.content)
 			print(url_formatter.name + " : " + str_day(day) + str_hour(hour) + str_min(minute))
 		else: 
-			print("url failed")
+			print(result.status_code)
 		minute += url_formatter.interval
 		if minute % 60 < minute:
 			hour += 1
 		if hour % 24 < hour:
 			day += 1
-
-#print(noaa_urls[0].format(82, 1750))
-download_batch(noaa_urls[3], './data', 82, 92, 19, 20, 30, 00)
+			
+			
+download_batch(noaa_urls[0], './data', 91, 101, 23, 5, 50, 30)
+download_batch(noaa_urls[2], './data', 91, 101, 23, 5, 50, 30)
+download_batch(noaa_urls[3], './data', 91, 101, 23, 5, 50, 30)

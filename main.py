@@ -1,4 +1,4 @@
-from weather_dataset import WeatherDataset, AIRMASS, MICROCLOUD, SANDWICH, plot, plot_image
+from weather_dataset import WeatherDataset, TrainingTransforms, AIRMASS, MICROCLOUD, SANDWICH, plot_from_dataset, plot_images
 from torch.utils.data import DataLoader
 from torch import optim, nn
 from models import Model1
@@ -37,8 +37,8 @@ INPUT_IMAGE_SIZE = 480
 NEW_MODEL = True 
 
 EPOCHS = 10 
-BATCH_SIZE = 32 
-LOADER_WORKERS = 2 
+BATCH_SIZE = 8 
+LOADER_WORKERS = 4 
 PERSITANT_WORKERS = LOADER_WORKERS > 0
 
 read_path = "model_saves\\" 
@@ -49,22 +49,19 @@ def run_model():
 	torch.manual_seed(0)
 
 	device = torch.device(CUDA if torch.cuda.is_available() else CPU)
-	#use_amp = use_amp and device == CUDA
-	print(device == CUDA)
+	use_amp = USE_AMP and device.type == CUDA
+	print(device.type)
 	print(USE_AMP)
-	print(device)
-
 	
 	model = Model1(3)
-	print(type(model.parameters()))	
-
 
 	if not NEW_MODEL:
 		model.load_state_dict(torch.load(read_path, map_location='cpu'))
 
 
 	if MODE == TRAIN:
-		train_dataset = WeatherDataset.new_from_files("data", DATA_SUBSETS)	
+		train_dataset = WeatherDataset.new_from_files("data", DATA_SUBSETS, truth_offset=1)	
+		valid_dataset = train_dataset.split_set(0.8)
 		train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=SHUFFLE, num_workers=LOADER_WORKERS, persistent_workers=PERSITANT_WORKERS, pin_memory=True)
 
 		criterion = nn.KLDivLoss()
@@ -77,6 +74,7 @@ def run_model():
 
 		model = model.to(device)
 		model.train()
+		train_transforms = TrainingTransforms(256).to(device)
 
 		best_loss = 10000000.0
 		for epoch in range(EPOCHS):
@@ -87,8 +85,9 @@ def run_model():
 				optimizer.zero_grad(set_to_none=True)
 				if device == CUDA:
 					torch.cuda.empty_cache()
-				images = images.to(device)
-				truth_images = truth_images.to(device)
+				train_transforms.scramble()
+				images =	train_transforms(images.to(device)) 
+				truth_images = train_transforms(truth_images.to(device)) 
 				with torch.autocast(device_type='cuda', dtype=torch.float16, enabled=USE_AMP):					
 					outputs = model(images)
 					loss = criterion(outputs, truth_images)
@@ -99,6 +98,7 @@ def run_model():
 				#optimizer.step()
 				total_loss += loss.item() * images.size(0) 
 				total_sample += images.size(0) 
+				print(f"batch: {batch_index}")
 			scheduler.step()
 			loss = total_loss / total_sample
 			if loss < best_loss:
@@ -106,6 +106,20 @@ def run_model():
 				torch.save(model.state_dict(), save_path)
 				best_loss = loss
 			print(f"Training: Loss: {loss}")
+
+			images = []
+			image, truth = train_dataset[0]
+			truth_images = [truth]
+			image = image[None, :].to(device)
+			images.append(model(image).detach())
+			for i in range(0, 4):
+				images.append(model(images[i]).detach())
+				_, truth = train_dataset[i + 1]
+				truth_images.append(truth)
+			for i in range(len(images)):
+				images[i] = images[i].to(CPU)
+			plot_images(images)
+
 			
 
 		torch.save(model.state_dict(), save_path)
