@@ -2,6 +2,8 @@ import torch
 from torch import nn 
 from torch.nn import functional
 
+SAME = 'same'
+VALID = 'valid'
 
 ENCODER = 'encoder'
 DECODER = 'decoder'
@@ -14,7 +16,7 @@ class BnConv(nn.Module):
 		self.bn = nn.BatchNorm2d(channels_out)
 		self.conv = nn.Conv2d(channels_in, channels_out, kernel_size=kernel_size, stride=stride, padding=padding)
 		self.activation = activation
-		self.res_connect = res_connect
+		self.res_connect = res_connect and stride == 1 and padding == 'same'
 	def forward(self, x):
 		if self.res_connect:
 			return self.activation(self.bn(self.conv(x))) + x
@@ -29,6 +31,12 @@ class ConvStack(nn.Module):
 		for layer  in self.layers:
 			x = layer(x)
 		return x
+
+class BnTransConv(nn.Module):
+	def __init__(self, channels_in, channels_out, kernel_size=3, stride=1, padding='valid', activation=torch.relu) -> None:
+		super().__init__()
+	def forward(self, x):
+		pass
 
 class DownMod(nn.Module):
 	def __init__(self, channels_in, channels_out, res_connect=False,  half_dilated = False) -> None:
@@ -58,6 +66,34 @@ class UpMod(nn.Module):
 #16 64
 #8 32
 class Model1(nn.Module):
+	def __init__(self, channels, sequence_size = 1) -> None:
+		super().__init__()
+		self.sequence_size = sequence_size
+		self.sections = [ENCODER, DECODER]
+		self.layers = {
+			ENCODER: [
+				BnConv(channels, 32),
+				DownMod(32, 32, res_connect=True),
+				DownMod(32, 64, res_connect=True),
+				DownMod(64, 128, res_connect=True),
+				ConvStack(128, 2, res_connect=True)
+			],
+			DECODER: [
+				UpMod(128, 64, res_connect=True),
+				UpMod(64, 32, res_connect=True),
+				UpMod(32, 32, res_connect=True),
+				BnConv(32, channels, activation=torch.tanh),
+			]
+		}
+		self.sub_modules = nn.ModuleDict({key: nn.Sequential(*layers) for key, layers in self.layers.items()}) 
+	def forward(self, x):
+		x = self.sub_modules[ENCODER](x)	
+		x = self.sub_modules[DECODER](x)	
+		return x
+	
+
+
+class Model2(nn.Module):
 	def __init__(self, channels, sequence_size = 1) -> None:
 		super().__init__()
 		self.sequence_size = sequence_size

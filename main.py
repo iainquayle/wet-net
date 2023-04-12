@@ -24,9 +24,9 @@ ADAM = 'adam'
 SGD = 'sgd'
 OPTIMIZER = ADAM 
 
-ADAM_LR = 0.0002
+ADAM_LR = 0.0003
 SGD_LR = 0.01
-GAMMA = 0.96
+GAMMA = 0.97
 
 TRAIN = 'train'
 EVAL = 'eval'
@@ -34,9 +34,9 @@ MODE = TRAIN
 
 INPUT_IMAGE_SIZE = 256 
 
-NEW_MODEL = True 
+NEW_MODEL = False 
 
-EPOCHS = 10 
+EPOCHS = 50 
 BATCH_SIZE = 16 
 LOADER_WORKERS = 4 
 PERSITANT_WORKERS = LOADER_WORKERS > 0
@@ -56,6 +56,7 @@ def run_model():
 	model = Model1(3 * len(DATA_SUBSETS))
 
 	if not NEW_MODEL:
+		print("model loading from save")
 		model.load_state_dict(torch.load(read_path, map_location='cpu'))
 
 
@@ -76,6 +77,20 @@ def run_model():
 		model = model.to(device)
 		model.train()
 		train_transforms = TrainingTransforms(INPUT_IMAGE_SIZE).to(device)
+
+		if True:
+			images = []
+			demo_size = 4
+			hold = valid_dataset.truth_sequence_size
+			valid_dataset.truth_sequence_size = demo_size 
+			image, truths = valid_dataset[0]
+			image = image[-1][None, :].to(device)
+			images.append(model(image).detach().to(CPU))
+			for i in range(0, demo_size - 1):
+				images.append(model(images[i].to(device)).detach().to(CPU))
+			valid_dataset.truth_sequence_size = hold
+			plot_image_pairs(list(zip(images, truths)))
+		exit()
 
 		best_loss = 10000000.0
 		for epoch in range(EPOCHS):
@@ -108,17 +123,6 @@ def run_model():
 				best_loss = loss
 			print(f"Training: Loss: {loss}")
 
-			images = []
-			demo_size = 4
-			hold = valid_dataset.truth_sequence_size
-			valid_dataset.truth_sequence_size = demo_size 
-			image, truths = valid_dataset[0]
-			image = image[-1][None, :].to(device)
-			images.append(model(image).detach().to(CPU))
-			for i in range(0, demo_size - 1):
-				images.append(model(images[i].to(device)).detach().to(CPU))
-			valid_dataset.truth_sequence_size = hold
-			plot_image_pairs(list(zip(images, truths)))
 
 			
 
