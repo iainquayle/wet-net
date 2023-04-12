@@ -58,8 +58,9 @@ class UpMod(nn.Module):
 #16 64
 #8 32
 class Model1(nn.Module):
-	def __init__(self, channels) -> None:
+	def __init__(self, channels, sequence_size = 1) -> None:
 		super().__init__()
+		self.sequence_size = sequence_size
 		self.sections = [ENCODER, DECODER]
 		self.layers = {
 			ENCODER: [
@@ -73,7 +74,7 @@ class Model1(nn.Module):
 				UpMod(128, 64, res_connect=True),
 				UpMod(64, 32, res_connect=True),
 				UpMod(32, 32, res_connect=True),
-				BnConv(32, channels, activation=torch.sigmoid),
+				BnConv(32, channels, activation=torch.tanh),
 			]
 		}
 		self.sub_modules = nn.ModuleDict({key: nn.Sequential(*layers) for key, layers in self.layers.items()}) 

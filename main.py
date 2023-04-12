@@ -1,4 +1,4 @@
-from weather_dataset import WeatherDataset, TrainingTransforms, AIRMASS, MICROCLOUD, SANDWICH, plot_from_dataset, plot_images
+from weather_dataset import WeatherDataset, TrainingTransforms, AIRMASS, MICROCLOUD, SANDWICH, plot_from_dataset, plot_images, plot_image_pairs
 from torch.utils.data import DataLoader
 from torch import optim, nn
 from models import Model1
@@ -24,7 +24,7 @@ ADAM = 'adam'
 SGD = 'sgd'
 OPTIMIZER = ADAM 
 
-ADAM_LR = 0.0001
+ADAM_LR = 0.0002
 SGD_LR = 0.01
 GAMMA = 0.96
 
@@ -32,16 +32,16 @@ TRAIN = 'train'
 EVAL = 'eval'
 MODE = TRAIN 
 
-INPUT_IMAGE_SIZE = 480 
+INPUT_IMAGE_SIZE = 256 
 
 NEW_MODEL = True 
 
 EPOCHS = 10 
-BATCH_SIZE = 8 
+BATCH_SIZE = 16 
 LOADER_WORKERS = 4 
 PERSITANT_WORKERS = LOADER_WORKERS > 0
 
-read_path = "model_saves\\" 
+read_path = "model_saves\\model1_1" 
 save_path = "model_saves\\model1_1"
 
 
@@ -53,18 +53,19 @@ def run_model():
 	print(device.type)
 	print(USE_AMP)
 	
-	model = Model1(3)
+	model = Model1(3 * len(DATA_SUBSETS))
 
 	if not NEW_MODEL:
 		model.load_state_dict(torch.load(read_path, map_location='cpu'))
 
 
 	if MODE == TRAIN:
-		train_dataset = WeatherDataset.new_from_files("data", DATA_SUBSETS, truth_offset=1)	
+		train_dataset = WeatherDataset.new_from_files("data", DATA_SUBSETS, truth_sequence_size=1, truth_offset=1, stride=6)	
 		valid_dataset = train_dataset.split_set(0.8)
 		train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=SHUFFLE, num_workers=LOADER_WORKERS, persistent_workers=PERSITANT_WORKERS, pin_memory=True)
 
-		criterion = nn.KLDivLoss()
+		#criterion = nn.KLDivLoss()
+		criterion = nn.MSELoss()
 		
 		optimizer = optim.Adam(model.parameters(), lr=ADAM_LR, weight_decay=0.00002) if OPTIMIZER == ADAM else optim.SGD(model.parameters(), lr=SGD_LR, momentum=0.9, weight_decay=0.00002)
 		scheduler = optim.lr_scheduler.ExponentialLR(optimizer=optimizer, gamma=GAMMA, verbose=True)
@@ -74,7 +75,7 @@ def run_model():
 
 		model = model.to(device)
 		model.train()
-		train_transforms = TrainingTransforms(256).to(device)
+		train_transforms = TrainingTransforms(INPUT_IMAGE_SIZE).to(device)
 
 		best_loss = 10000000.0
 		for epoch in range(EPOCHS):
@@ -82,22 +83,22 @@ def run_model():
 			total_loss = 0
 			total_sample = 0
 			for batch_index, (images, truth_images) in enumerate(train_loader):
-				optimizer.zero_grad(set_to_none=True)
 				if device == CUDA:
 					torch.cuda.empty_cache()
+				optimizer.zero_grad(set_to_none=True)
 				train_transforms.scramble()
-				images =	train_transforms(images.to(device)) 
-				truth_images = train_transforms(truth_images.to(device)) 
-				with torch.autocast(device_type='cuda', dtype=torch.float16, enabled=USE_AMP):					
-					outputs = model(images)
-					loss = criterion(outputs, truth_images)
-				scaler.scale(loss).backward()
-				scaler.step(optimizer)
-				scaler.update()
-				#loss.backward()
-				#optimizer.step()
-				total_loss += loss.item() * images.size(0) 
-				total_sample += images.size(0) 
+				images = [train_transforms(image.to(device)) for image in images]
+				truth_images = [train_transforms(image.to(device)) for image in truth_images]
+				for i in range(len(truth_images)):
+					with torch.autocast(device_type='cuda', dtype=torch.float16, enabled=USE_AMP):					
+						outputs = model(images[-1])
+						loss = criterion(outputs, truth_images[i])
+						images.append(outputs.detach())
+					scaler.scale(loss).backward()
+					scaler.step(optimizer)
+					scaler.update()
+					total_loss += loss.item() * images[0].size(0) 
+					total_sample += images[0].size(0) 
 				print(f"batch: {batch_index}")
 			scheduler.step()
 			loss = total_loss / total_sample
@@ -108,17 +109,16 @@ def run_model():
 			print(f"Training: Loss: {loss}")
 
 			images = []
-			image, truth = train_dataset[0]
-			truth_images = [truth]
-			image = image[None, :].to(device)
-			images.append(model(image).detach())
-			for i in range(0, 4):
-				images.append(model(images[i]).detach())
-				_, truth = train_dataset[i + 1]
-				truth_images.append(truth)
-			for i in range(len(images)):
-				images[i] = images[i].to(CPU)
-			plot_images(images)
+			demo_size = 4
+			hold = valid_dataset.truth_sequence_size
+			valid_dataset.truth_sequence_size = demo_size 
+			image, truths = valid_dataset[0]
+			image = image[-1][None, :].to(device)
+			images.append(model(image).detach().to(CPU))
+			for i in range(0, demo_size - 1):
+				images.append(model(images[i].to(device)).detach().to(CPU))
+			valid_dataset.truth_sequence_size = hold
+			plot_image_pairs(list(zip(images, truths)))
 
 			
 
