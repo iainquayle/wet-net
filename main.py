@@ -1,3 +1,4 @@
+import gc
 from weather_dataset import WeatherDataset, TrainingTransforms, AIRMASS, MICROCLOUD, SANDWICH, plot_from_dataset, plot_images, plot_image_pairs
 from torch.utils.data import DataLoader
 from torch import optim, nn
@@ -23,26 +24,26 @@ LONE = 'l1'
 TRAIN = 'train'
 EVAL = 'eval'
 
-INPUT_IMAGE_SIZE = 256 
+INPUT_IMAGE_SIZE = 512 
 
 EPOCHS = 50 
-BATCH_SIZE = 16 
+BATCH_SIZE = 6 
 LOADER_WORKERS = 2 
 PERSITANT_WORKERS = LOADER_WORKERS > 0
 
-ADAM_LR = 0.0003
+ADAM_LR = 0.0002
 SGD_LR = 0.01
 GAMMA = 0.97
-OPTIMIZER = ADAM 
-LOSS = MSE
+OPTIMIZER = SGD 
+LOSS = HUBER 
 
-#DATA_SUBSETS = [SANDWICH, MICROCLOUD, AIRMASS]
-DATA_SUBSETS = [SANDWICH]
+DATA_SUBSETS = [SANDWICH, MICROCLOUD, AIRMASS]
+#DATA_SUBSETS = [SANDWICH]
 MODE = TRAIN 
 NEW_MODEL = True 
 SEQUENCE_SIZE = 2
-read_path = "model_saves\\model2_1" 
-save_path = "model_saves\\model2_1"
+read_path = "model_saves\\model2_2" 
+save_path = "model_saves\\model2_2"
 
 
 def run_model():
@@ -53,7 +54,7 @@ def run_model():
 	print(device.type)
 	print(USE_AMP)
 	
-	train_dataset = WeatherDataset.new_from_files("data", DATA_SUBSETS, sequence_size=SEQUENCE_SIZE, truth_sequence_size=3, truth_offset=1, stride=6)	
+	train_dataset = WeatherDataset.new_from_files("data", DATA_SUBSETS, sequence_size=SEQUENCE_SIZE, truth_sequence_size=4, truth_offset=1, stride=12)	
 	valid_dataset = train_dataset.split_set(0.8)
 	model = Model2(train_dataset.channels(), sequence_size=SEQUENCE_SIZE)
 	model = model.to(device)
@@ -73,17 +74,6 @@ def run_model():
 			criterion = nn.HuberLoss()
 		elif LOSS == LONE:
 			criterion = nn.L1Loss()
-		criterion = nn.MSELoss() 
-		
-		optimizer = optim.Adam(model.parameters(), lr=ADAM_LR, weight_decay=0.00002) if OPTIMIZER == ADAM else optim.SGD(model.parameters(), lr=SGD_LR, momentum=0.9, weight_decay=0.00002)
-		scheduler = optim.lr_scheduler.ExponentialLR(optimizer=optimizer, gamma=GAMMA, verbose=True)
-		#scheduler = optim.lr_scheduler.StepLR(optimizer=optimizer, step_size=10, gamma=0.5, verbose=True)
-		scaler = torch.cuda.amp.GradScaler(enabled=USE_AMP)
-
-		model.train()
-		train_transforms = TrainingTransforms(INPUT_IMAGE_SIZE).to(device)
-
-		best_loss = 10000000.0
 		
 		optimizer = optim.Adam(model.parameters(), lr=ADAM_LR, weight_decay=0.00002) if OPTIMIZER == ADAM else optim.SGD(model.parameters(), lr=SGD_LR, momentum=0.9, weight_decay=0.00002)
 		scheduler = optim.lr_scheduler.ExponentialLR(optimizer=optimizer, gamma=GAMMA, verbose=True)
@@ -105,6 +95,7 @@ def run_model():
 				train_transforms.scramble()
 				images = [train_transforms(image.to(device)) for image in images]
 				truth_images = [train_transforms(image.to(device)) for image in truth_images]
+				gc.collect()
 				for i in range(len(truth_images)):
 					with torch.autocast(device_type='cuda', dtype=torch.float16, enabled=USE_AMP):					
 						outputs = model(images[-SEQUENCE_SIZE:])
@@ -130,6 +121,7 @@ def run_model():
 		torch.save(model.state_dict(), save_path)
 		
 	if MODE == EVAL:
+		model.eval()
 		outputs = []
 		demo_size = 4
 		hold = valid_dataset.truth_sequence_size
